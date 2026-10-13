@@ -47,6 +47,25 @@ class AppTests(unittest.TestCase):
     def baseline(self):
         self.measure('target', (50, 20, -30))
 
+    def test_no_position_or_edit_controls_and_deletion_still_works(self):
+        self.assertEqual(self.page.locator('#tpos, #ppos').count(), 0)
+        self.baseline()
+        self.measure('print', (50,20,-30))
+        self.assertEqual(self.page.locator('#target-table tr').first.locator('td').count(), 5)
+        self.assertEqual(self.page.locator('.edit-row').count(), 0)
+        self.assertNotIn('위치', self.page.locator('#target-table').inner_text())
+        self.page.reload()
+        self.assertEqual(self.page.locator('#de').inner_text(), '0.00')
+        self.page.evaluate('buildReport()')
+        self.assertNotIn('위치', self.page.locator('#report-archive').inner_text())
+        with self.page.expect_download() as event:
+            self.page.get_by_role('button', name='CSV 저장', exact=True).click()
+        csv = Path(event.value.path()).read_text(encoding='utf-8-sig')
+        self.assertNotIn('위치', csv.splitlines()[0])
+        self.page.on('dialog', lambda d: d.accept())
+        self.page.locator('#print-table .del').first.click()
+        self.assertEqual(self.page.locator('#de').inner_text(), '—')
+
     def test_statistics_recalculate_and_small_samples(self):
         for row in [(50.1,20.2,-30), (49.9,19.8,-30.2), (50,20,-29.8)]:
             self.measure('target', row)
