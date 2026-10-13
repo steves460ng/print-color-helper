@@ -46,7 +46,6 @@ class AppTests(unittest.TestCase):
 
     def baseline(self):
         self.measure('target', (50, 20, -30))
-        self.page.get_by_role('button', name='타겟 기준 확정', exact=True).click()
 
     def test_statistics_recalculate_and_small_samples(self):
         for row in [(50.1,20.2,-30), (49.9,19.8,-30.2), (50,20,-29.8)]:
@@ -62,46 +61,45 @@ class AppTests(unittest.TestCase):
         self.page.locator('#target-table .del').first.click()
         self.assertEqual(self.page.locator('#target-stats strong').all_text_contents(), ['—','—','—'])
 
-    def test_required_baseline_and_original_lab_delta(self):
+    def test_measure_either_side_first_and_original_lab_delta(self):
         self.measure('print', (53,24,-30))
         self.assertEqual(self.page.locator('#de').inner_text(), '—')
-        self.assertEqual(self.page.evaluate('current().rows.length'), 0)
+        self.assertEqual(self.page.evaluate('state.print.length'), 1)
         self.baseline()
-        self.measure('print', (53,24,-30))
         self.assertEqual(self.page.locator('#de').inner_text(), '5.00')
         self.assertIn('불합격', self.page.locator('#verdict').inner_text())
         self.page.locator('#threshold').fill('5')
         self.page.locator('#threshold').dispatch_event('change')
         self.assertIn('합격', self.page.locator('#verdict').inner_text())
 
-    def test_baseline_versions_keep_old_results(self):
+    def test_target_average_updates_immediately(self):
         self.baseline()
-        self.measure('print', (53,24,-30))
+        self.measure('print', (55,20,-30))
+        self.assertEqual(self.page.locator('#de').inner_text(), '5.00')
         self.measure('target', (60,20,-30))
+        self.assertEqual(self.page.locator('#de').inner_text(), '0.00')
+        self.page.on('dialog', lambda d: d.accept())
+        self.page.locator('#target-table .del').last.click()
         self.assertEqual(self.page.locator('#de').inner_text(), '5.00')
-        self.page.get_by_role('button', name='타겟 기준 확정', exact=True).click()
-        self.assertEqual(self.page.locator('#de').inner_text(), '—')
-        self.assertEqual(self.page.evaluate('state.baselines.length'), 2)
-        self.page.locator('#stage-select').select_option(index=0)
-        self.assertEqual(self.page.locator('#de').inner_text(), '5.00')
+        self.assertEqual(self.page.get_by_role('button', name='타겟 기준 확정', exact=True).count(), 0)
 
-    def test_stage_isolation_and_reload(self):
+    def test_measurement_storage_and_clear_only_one_side(self):
         self.baseline()
         self.measure('print', (51.2,19.2,-29.6))
         self.page.locator('#meta-job').fill('새 작업 & 보고서')
-        self.page.get_by_role('button', name='＋ 다음 교정 시작').click()
-        self.page.locator('#stage-note').fill('M +1%p 시험')
-        self.measure('print', (50,20,-30))
         self.page.reload()
-        self.assertEqual(self.page.locator('#de').inner_text(), '0.00')
-        self.assertEqual(self.page.locator('#stage-note').input_value(), 'M +1%p 시험')
-        self.assertEqual(self.page.locator('#meta-job').input_value(), '새 작업 & 보고서')
-        self.page.locator('#stage-select').select_option(index=0)
         self.assertEqual(self.page.locator('#de').inner_text(), '1.50')
+        self.assertEqual(self.page.locator('#meta-job').input_value(), '새 작업 & 보고서')
+        self.page.on('dialog', lambda d: d.accept())
+        self.page.get_by_role('button', name='측정값 비우기', exact=True).last.click()
+        self.assertEqual(self.page.evaluate('state.target.length'), 1)
+        self.assertEqual(self.page.evaluate('state.print.length'), 0)
+        self.assertEqual(self.page.locator('#de').inner_text(), '—')
+        self.measure('print', (50,20,-30))
+        self.assertEqual(self.page.locator('#de').inner_text(), '0.00')
 
     def test_gamut_warning_preserves_large_delta(self):
         self.measure('target', (50,100,100))
-        self.page.get_by_role('button', name='타겟 기준 확정', exact=True).click()
         self.measure('print', (50,110,110))
         self.assertEqual(self.page.locator('#de').inner_text(), '14.14')
         self.assertIn('안내 보류', self.page.locator('#guide-copy').inner_text())
@@ -110,13 +108,13 @@ class AppTests(unittest.TestCase):
     def test_export_import_validation_and_safe_text(self):
         self.baseline()
         self.measure('print', (50,20,-30))
-        self.page.locator('#stage-note').fill('<img src=x onerror=alert(1)>')
-        self.assertEqual(self.page.locator('#history img').count(), 0)
+        self.page.locator('#meta-job').fill('<img src=x onerror=alert(1)>')
+        self.assertEqual(self.page.locator('#print-job img').count(), 0)
         with self.page.expect_download() as event:
             self.page.get_by_role('button', name='JSON 저장', exact=True).click()
         import json
         data = Path(event.value.path()).read_bytes()
-        self.assertEqual(json.loads(data)['schemaVersion'], 1)
+        self.assertEqual(json.loads(data)['schemaVersion'], 2)
         self.page.on('dialog', lambda d: d.accept())
         self.page.get_by_role('button', name='새 작업', exact=True).click()
         self.page.locator('#import-file').set_input_files({'name':'backup.json','mimeType':'application/json','buffer':data})
@@ -126,16 +124,16 @@ class AppTests(unittest.TestCase):
         self.page.wait_for_function("document.getElementById('toast').textContent.includes('실패')")
         self.assertEqual(self.page.locator('#de').inner_text(), '0.00')
 
-    def test_print_report_has_all_stages_and_mobile_fits(self):
+    def test_print_report_has_both_measurements_without_history(self):
         self.baseline()
         self.measure('print', (53,24,-30))
-        self.page.get_by_role('button', name='＋ 다음 교정 시작').click()
-        self.measure('print', (50,20,-30))
         self.page.evaluate('buildReport()')
         self.page.emulate_media(media='print')
         self.assertTrue(self.page.locator('#target-detail').is_visible())
-        self.assertEqual(self.page.locator('#report-archive .report-block').count(), 3)
-        self.assertIn('5.00', self.page.locator('#report-archive').inner_text())
+        self.assertEqual(self.page.locator('#report-archive .report-block').count(), 1)
+        self.assertIn('타겟 원본 측정 기록', self.page.locator('#report-archive').inner_text())
+        self.assertIn('인쇄물 원본 측정 기록', self.page.locator('#report-archive').inner_text())
+        self.assertNotIn('교정 이력', self.page.locator('body').inner_text())
         self.assertGreater(len(self.page.pdf(format='A4', print_background=True)), 1000)
         self.page.emulate_media(media='screen')
         self.page.set_viewport_size({'width':390,'height':844})
@@ -148,14 +146,38 @@ class AppTests(unittest.TestCase):
         self.measure('target', (50,20,-30))
         self.assertEqual(self.page.evaluate('localStorage.getItem(STORAGE_KEY)'), 'broken data')
 
-    def test_edit_changes_draft_not_frozen_baseline(self):
+    def test_correct_bad_measurement_by_delete_and_add(self):
         self.baseline()
+        self.measure('print', (60,20,-30))
+        self.assertEqual(self.page.locator('.edit-row').count(), 0)
+        self.page.on('dialog', lambda d:d.accept())
+        self.page.locator('#print-table .del').first.click()
         self.measure('print', (50,20,-30))
-        answers=iter(['60','20','-30','중앙'])
-        self.page.on('dialog', lambda d:d.accept(next(answers)))
-        self.page.locator('#target-table .edit-row').first.click()
-        self.assertEqual(self.page.locator('#target-stats strong').first.inner_text(), '60.00')
         self.assertEqual(self.page.locator('#de').inner_text(), '0.00')
+
+    def test_legacy_storage_migrates_and_keeps_original_history(self):
+        import json
+        row = {'id':'target-1','L':50,'a':20,'b':-30,'position':'중앙','time':'2026-10-13T00:00:00Z'}
+        legacy = {
+            'schemaVersion':1,'id':'legacy-project',
+            'metadata':{k:'' for k in ['job','sample','paper','press','device','mode','light','method']},
+            'target':[row], 'baselines':[{'id':'b1','version':1,'rows':[row],'createdAt':row['time']}],
+            'activeBaselineId':'b1',
+            'stages':[
+                {'id':'s1','name':'초기 측정','baselineId':'b1','threshold':2,'rows':[dict(row,id='p1',L=60)],'note':'조정 전','createdAt':row['time']},
+                {'id':'s2','name':'1차 교정','baselineId':'b1','threshold':3,'rows':[dict(row,id='p2',L=51)],'note':'교정','createdAt':row['time']}
+            ],'selectedStageId':'s2','updatedAt':row['time']
+        }
+        serialized=json.dumps(legacy,ensure_ascii=False)
+        self.page.evaluate("text => {localStorage.removeItem(STORAGE_KEY);localStorage.setItem(LEGACY_STORAGE_KEY,text)}",serialized)
+        self.page.reload()
+        self.assertEqual(self.page.locator('#de').inner_text(), '1.00')
+        self.assertEqual(self.page.locator('#threshold').input_value(), '3')
+        self.assertEqual(self.page.evaluate('localStorage.getItem(LEGACY_STORAGE_KEY)'),serialized)
+        self.assertEqual(self.page.evaluate('state.legacyArchive.stages.length'),2)
+        self.page.reload()
+        self.assertEqual(self.page.locator('#de').inner_text(), '1.00')
+        self.assertEqual(self.page.evaluate('state.legacyArchive.stages.length'),2)
 
 if __name__ == '__main__':
     unittest.main()
