@@ -21,5 +21,8 @@
 @media print{.measurement-controls{display:none}}
 
 /* Signed Lab entry remains usable when the phone's decimal keyboard has no minus key. */
-.lab-field{min-width:0}.lab-field>label{display:block}.signed-input{position:relative}.signed-input input{padding-right:50px}.sign-toggle{position:absolute;right:0;top:5px;bottom:0;width:44px;border:1px solid var(--line);border-radius:0 5px 5px 0;background:#edf2eb;color:var(--green);font-size:21px;font-weight:600;touch-action:manipulation}.sign-toggle:active{background:#dce8da}.inputs input{min-height:44px;font-size:16px}
+.lab-field{min-width:0}.lab-field>label{display:block}
+.signed-input{display:flex;align-items:stretch;margin-top:5px;min-width:0}
+.signed-input input{flex:1;min-width:0;width:0;margin:0;border-right:0;border-radius:5px 0 0 5px;padding-right:10px}
+.sign-toggle{flex:0 0 44px;display:grid;place-items:center;min-height:44px;padding:0;border:1px solid var(--line);border-radius:0 5px 5px 0;background:#edf2eb;color:var(--green);font-size:21px;font-weight:600;touch-action:manipulation}.sign-toggle:active{background:#dce8da}.inputs input{min-height:44px;font-size:16px}
 @media print{.sign-toggle{display:none}}

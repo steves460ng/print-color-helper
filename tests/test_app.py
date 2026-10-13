@@ -88,6 +88,20 @@ class AppTests(unittest.TestCase):
         finally:
             mobile.close()
 
+    def test_sign_buttons_stay_on_same_row_on_desktop_and_mobile(self):
+        for width in [1440, 390]:
+            self.page.set_viewport_size({'width':width,'height':900})
+            for field_id in ['ta','tb','pa','pb']:
+                field=self.page.locator('#'+field_id).bounding_box()
+                button=self.page.locator('[data-for="'+field_id+'"]').bounding_box()
+                self.assertAlmostEqual(field['y'],button['y'],delta=1)
+                self.assertAlmostEqual(field['height'],button['height'],delta=1)
+                self.assertAlmostEqual(field['x']+field['width'],button['x'],delta=1)
+                self.assertGreaterEqual(button['width'],44)
+            self.assertTrue(self.page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
+        asset_urls=self.page.locator('link[rel="stylesheet"],script[src]').evaluate_all('(nodes)=>nodes.map(n=>n.href||n.src)')
+        self.assertTrue(all('?v=' in url for url in asset_urls))
+
     def test_sign_toggle_empty_partial_and_normalized_values(self):
         field=self.page.locator('#ta')
         button=self.page.locator('[data-for="ta"]')
