@@ -91,9 +91,11 @@ var ColorCalc = (function(){
 
 
 // All records stay local. Exports are explicit backups; no measurements leave the browser.
-const STORAGE_KEY = 'chroma.workspace.v2';
+const STORAGE_KEY = 'chroma.workspace.v3';
+const PREVIOUS_STORAGE_KEY = 'chroma.workspace.v2';
 const LEGACY_STORAGE_KEY = 'chroma.workspace.v1';
-const META_KEYS = ['job', 'sample', 'paper', 'press', 'device', 'mode', 'light', 'method'];
+const META_KEYS = ['date', 'job', 'operator', 'notes'];
+const PREVIOUS_META_KEYS = ['job', 'sample', 'paper', 'press', 'device', 'mode', 'light', 'method'];
 const $ = id => document.getElementById(id);
 const uid = () => crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
 const now = () => new Date().toISOString();
@@ -102,34 +104,47 @@ const f = (v, n = 2) => Number.isFinite(v) ? (Math.abs(v) < .5 * 10 ** -n ? 0 : 
 const normalize = value => String(value).trim().replace(/[−‒–—－﹣]/g, '-').replace(/,/g, '.');
 const dateLabel = value => new Date(value).toLocaleString('ko-KR');
 function emptyProject() {
-  return {schemaVersion: 2, id: uid(), metadata: Object.fromEntries(META_KEYS.map(k => [k, ''])), target: [], print: [], threshold: 2, updatedAt: now()};
+  return {schemaVersion: 3, id: uid(), metadata: Object.fromEntries(META_KEYS.map(k => [k, ''])), target: [], print: [], threshold: 2, updatedAt: now()};
 }
 function validRows(rows) {
   return Array.isArray(rows) && rows.length <= 10000 && rows.every(r => r && typeof r.id === 'string' && r.id.length < 100 && ['L','a','b'].every(k => Number.isFinite(r[k])) && r.L >= 0 && r.L <= 100 && Math.abs(r.a) <= 1000 && Math.abs(r.b) <= 1000 && (r.position === undefined || (typeof r.position === 'string' && r.position.length <= 200)) && typeof r.time === 'string' && Number.isFinite(Date.parse(r.time))) && new Set(rows.map(r => r.id)).size === rows.length;
 }
 function validLegacyState(s) {
-  if (!s || s.schemaVersion !== 1 || typeof s.id !== 'string' || !s.metadata || !META_KEYS.every(k => typeof s.metadata[k] === 'string' && s.metadata[k].length <= 1000) || !validRows(s.target) || !Array.isArray(s.baselines) || s.baselines.length > 1000 || !Array.isArray(s.stages) || !s.stages.length || s.stages.length > 1000) return false;
+  if (!s || s.schemaVersion !== 1 || typeof s.id !== 'string' || !s.metadata || !PREVIOUS_META_KEYS.every(k => typeof s.metadata[k] === 'string' && s.metadata[k].length <= 1000) || !validRows(s.target) || !Array.isArray(s.baselines) || s.baselines.length > 1000 || !Array.isArray(s.stages) || !s.stages.length || s.stages.length > 1000) return false;
   const baselineIds = new Set(s.baselines.map(b => b.id));
   if (baselineIds.size !== s.baselines.length || !s.baselines.every(b => typeof b.id === 'string' && Number.isInteger(b.version) && b.version > 0 && validRows(b.rows) && b.rows.length > 0 && Number.isFinite(Date.parse(b.createdAt)))) return false;
   if (s.activeBaselineId !== null && !baselineIds.has(s.activeBaselineId)) return false;
   if (new Set(s.stages.map(t => t.id)).size !== s.stages.length) return false;
   return s.stages.every(t => typeof t.id === 'string' && typeof t.name === 'string' && t.name.length <= 100 && typeof t.note === 'string' && t.note.length <= 2000 && validRows(t.rows) && Number.isFinite(t.threshold) && t.threshold >= 0 && t.threshold <= 100 && (t.baselineId === null ? t.rows.length === 0 : baselineIds.has(t.baselineId)) && Number.isFinite(Date.parse(t.createdAt))) && s.stages.some(t => t.id === s.selectedStageId);
 }
+function validPreviousState(s) {
+  return !!s && s.schemaVersion === 2 && typeof s.id === 'string' && !!s.metadata && PREVIOUS_META_KEYS.every(k => typeof s.metadata[k] === 'string' && s.metadata[k].length <= 1000) && validRows(s.target) && validRows(s.print) && Number.isFinite(s.threshold) && s.threshold >= 0 && s.threshold <= 100 && (s.legacyArchive === undefined || validLegacyState(s.legacyArchive));
+}
+function validWorkDate(date) {
+  if (date === '') return true;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+  const parsed = new Date(date + 'T00:00:00Z');
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0,10) === date;
+}
 function validState(s) {
-  return !!s && s.schemaVersion === 2 && typeof s.id === 'string' && !!s.metadata && META_KEYS.every(k => typeof s.metadata[k] === 'string' && s.metadata[k].length <= 1000) && validRows(s.target) && validRows(s.print) && Number.isFinite(s.threshold) && s.threshold >= 0 && s.threshold <= 100 && (s.legacyArchive === undefined || validLegacyState(s.legacyArchive));
+  return !!s && s.schemaVersion === 3 && typeof s.id === 'string' && !!s.metadata && META_KEYS.every(k => typeof s.metadata[k] === 'string' && s.metadata[k].length <= 1000) && validWorkDate(s.metadata.date) && validRows(s.target) && validRows(s.print) && Number.isFinite(s.threshold) && s.threshold >= 0 && s.threshold <= 100 && (s.legacyArchive === undefined || validLegacyState(s.legacyArchive));
 }
 function readProject(s) {
   if (validState(s)) return s;
+  if (validPreviousState(s)) {
+    // Preserve hidden old metadata in JSON, while showing only the four current fields.
+    return {...s, schemaVersion: 3, metadata: {...s.metadata, date: '', operator: '', notes: ''}};
+  }
   if (!validLegacyState(s)) throw new Error('지원하는 CHROMA 기록 형식이 아닙니다.');
   const selected = s.stages.find(stage => stage.id === s.selectedStageId);
   // Keep the original document in exports; old local storage remains untouched.
-  return {schemaVersion: 2, id: s.id, metadata: structuredClone(s.metadata), target: structuredClone(s.target), print: structuredClone(selected.rows), threshold: selected.threshold, legacyArchive: structuredClone(s), updatedAt: now()};
+  return {schemaVersion: 3, id: s.id, metadata: {...s.metadata, date: '', operator: '', notes: ''}, target: structuredClone(s.target), print: structuredClone(selected.rows), threshold: selected.threshold, legacyArchive: structuredClone(s), updatedAt: now()};
 }
 let state = emptyProject();
 let storageFailure = false;
 let loadError = '';
 try {
-  const saved = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY);
+  const saved = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(PREVIOUS_STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY);
   if (saved) {
     const parsed = JSON.parse(saved);
     state = readProject(parsed);
@@ -347,7 +362,6 @@ function buildReport() {
 
 }
 function printReport() {
-  if(!state.metadata.mode||!state.metadata.light)toast('보고서에 측정 조건이 미입력 상태로 표시됩니다.');
   buildReport(); window.print();
 }
 window.addEventListener('beforeprint',buildReport);

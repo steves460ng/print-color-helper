@@ -119,6 +119,42 @@ class AppTests(unittest.TestCase):
         self.assertEqual(field.input_value(), '-0.42')
         self.assertEqual(self.page.locator('[data-for="tL"], [data-for="pL"]').count(), 0)
 
+    def test_four_job_fields_restore_and_print(self):
+        values={'date':'2026-10-13','job':'색상 교정 작업','operator':'홍길동','notes':'재측정 완료\n확인용 <메모>'}
+        self.assertEqual(self.page.locator('.project input, .project textarea').count(),4)
+        for key,value in values.items():self.page.locator('#meta-'+key).fill(value)
+        self.page.reload()
+        for key,value in values.items():
+            self.assertEqual(self.page.locator('#meta-'+key).input_value(),value)
+        self.page.emulate_media(media='print')
+        for key,value in values.items():
+            self.assertTrue(self.page.locator('#print-'+key).is_visible())
+            self.assertFalse(self.page.locator('#meta-'+key).is_visible())
+            self.assertEqual(self.page.locator('#print-'+key).text_content(),value)
+        self.assertEqual(self.page.locator('#meta-device,#meta-mode,#meta-light').count(),0)
+
+    def test_previous_metadata_migrates_without_losing_measurements(self):
+        import json
+        self.baseline()
+        self.measure('print',(51,20,-30))
+        old=self.page.evaluate('structuredClone(state)')
+        old['schemaVersion']=2
+        old['metadata']={k:'' for k in ['job','sample','paper','press','device','mode','light','method']}
+        old['metadata'].update(job='이전 작업',paper='아트지',mode='M1')
+        serialized=json.dumps(old,ensure_ascii=False)
+        self.page.evaluate("text=>{localStorage.removeItem(STORAGE_KEY);localStorage.setItem(PREVIOUS_STORAGE_KEY,text)}",serialized)
+        self.page.reload()
+        self.assertEqual(self.page.locator('#de').inner_text(),'1.00')
+        self.assertEqual(self.page.locator('#meta-job').input_value(),'이전 작업')
+        self.assertEqual(self.page.locator('#meta-date').input_value(),'')
+        self.assertEqual(self.page.evaluate('state.metadata.paper'),'아트지')
+        self.assertEqual(self.page.evaluate('localStorage.getItem(PREVIOUS_STORAGE_KEY)'),serialized)
+        with self.page.expect_download() as event:
+            self.page.get_by_role('button',name='JSON 저장',exact=True).click()
+        exported=json.loads(Path(event.value.path()).read_text())
+        self.assertEqual(exported['metadata']['mode'],'M1')
+        self.assertEqual(exported['schemaVersion'],3)
+
     def test_statistics_recalculate_and_small_samples(self):
         for row in [(50.1,20.2,-30), (49.9,19.8,-30.2), (50,20,-29.8)]:
             self.measure('target', row)
@@ -186,7 +222,7 @@ class AppTests(unittest.TestCase):
             self.page.get_by_role('button', name='JSON 저장', exact=True).click()
         import json
         data = Path(event.value.path()).read_bytes()
-        self.assertEqual(json.loads(data)['schemaVersion'], 2)
+        self.assertEqual(json.loads(data)['schemaVersion'], 3)
         self.page.on('dialog', lambda d: d.accept())
         self.page.get_by_role('button', name='새 작업', exact=True).click()
         self.page.locator('#import-file').set_input_files({'name':'backup.json','mimeType':'application/json','buffer':data})
