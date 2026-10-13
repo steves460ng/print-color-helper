@@ -89,10 +89,20 @@
 <div class="inputs" id="target-input">
 <label>L*<input id="tL" value="" inputmode="decimal">
 </label>
-<label>a*<input id="ta" value="" inputmode="decimal">
-</label>
-<label>b*<input id="tb" value="" inputmode="decimal">
-</label>
+<div class="lab-field">
+<label for="ta">a*</label>
+<div class="signed-input">
+<input id="ta" type="text" value="" inputmode="decimal" autocomplete="off">
+<button type="button" class="sign-toggle" data-for="ta" aria-label="타겟 a* 부호 전환">±</button>
+</div>
+</div>
+<div class="lab-field">
+<label for="tb">b*</label>
+<div class="signed-input">
+<input id="tb" type="text" value="" inputmode="decimal" autocomplete="off">
+<button type="button" class="sign-toggle" data-for="tb" aria-label="타겟 b* 부호 전환">±</button>
+</div>
+</div>
 </div>
 <div class="addline">
 <span class="hint">추가한 측정값만 평균에 반영됩니다.</span>
@@ -132,10 +142,20 @@
 <div class="inputs">
 <label>L*<input id="pL" value="" inputmode="decimal">
 </label>
-<label>a*<input id="pa" value="" inputmode="decimal">
-</label>
-<label>b*<input id="pb" value="" inputmode="decimal">
-</label>
+<div class="lab-field">
+<label for="pa">a*</label>
+<div class="signed-input">
+<input id="pa" type="text" value="" inputmode="decimal" autocomplete="off">
+<button type="button" class="sign-toggle" data-for="pa" aria-label="인쇄물 a* 부호 전환">±</button>
+</div>
+</div>
+<div class="lab-field">
+<label for="pb">b*</label>
+<div class="signed-input">
+<input id="pb" type="text" value="" inputmode="decimal" autocomplete="off">
+<button type="button" class="sign-toggle" data-for="pb" aria-label="인쇄물 b* 부호 전환">±</button>
+</div>
+</div>
 </div>
 <div class="addline">
 <span class="hint">추가한 측정값만 평균에 반영됩니다.</span>

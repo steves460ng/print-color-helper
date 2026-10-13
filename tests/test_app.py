@@ -66,6 +66,45 @@ class AppTests(unittest.TestCase):
         self.page.locator('#print-table .del').first.click()
         self.assertEqual(self.page.locator('#de').inner_text(), '—')
 
+    def test_mobile_sign_buttons_record_negative_values_and_restore(self):
+        mobile = self.browser.new_context(viewport={'width':390,'height':844}, is_mobile=True, has_touch=True)
+        try:
+            page = mobile.new_page()
+            page.goto(self.url)
+            for prefix in ['t','p']:
+                page.locator('#'+prefix+'L').fill('17.3')
+                for axis,value in [('a','0.42'),('b','1.8')]:
+                    field = page.locator('#'+prefix+axis)
+                    field.fill(value)
+                    page.locator('[data-for="'+prefix+axis+'"]').tap()
+                    self.assertEqual(field.input_value(), '-'+value)
+                    self.assertTrue(field.evaluate('(el) => el === document.activeElement'))
+                page.get_by_role('button', name='＋ 측정값 추가').nth(0 if prefix=='t' else 1).tap()
+            self.assertEqual(page.locator('#de').inner_text(), '0.00')
+            page.reload()
+            self.assertEqual(page.locator('#target-stats strong').all_text_contents(), ['17.30','-0.42','-1.80'])
+            self.assertEqual(page.locator('#print-stats strong').all_text_contents(), ['17.30','-0.42','-1.80'])
+            self.assertTrue(page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
+        finally:
+            mobile.close()
+
+    def test_sign_toggle_empty_partial_and_normalized_values(self):
+        field=self.page.locator('#ta')
+        button=self.page.locator('[data-for="ta"]')
+        button.click()
+        self.assertEqual(field.input_value(), '-')
+        button.click()
+        self.assertEqual(field.input_value(), '')
+        field.fill('−0,42')
+        button.click()
+        self.assertEqual(field.input_value(), '0.42')
+        button.click()
+        self.assertEqual(field.input_value(), '-0.42')
+        field.fill('+0.42')
+        button.click()
+        self.assertEqual(field.input_value(), '-0.42')
+        self.assertEqual(self.page.locator('[data-for="tL"], [data-for="pL"]').count(), 0)
+
     def test_statistics_recalculate_and_small_samples(self):
         for row in [(50.1,20.2,-30), (49.9,19.8,-30.2), (50,20,-29.8)]:
             self.measure('target', row)
