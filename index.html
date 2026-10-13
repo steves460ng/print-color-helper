@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CHROMA — 인쇄 색상 교정 리포트</title>
-<link rel="stylesheet" href="styles.css?v=b79e6cde8f93">
+<link rel="stylesheet" href="styles.css?v=3e4b26373013">
 </head>
 <body>
 <nav>
@@ -37,44 +37,24 @@
 </div>
 <div class="project">
 <label>
+<div class="label">작업일</div>
+<input id="meta-date" type="date" value="" maxlength="1000" placeholder="입력하세요" oninput="syncMeta()">
+<strong class="print-meta" id="print-date">미입력</strong>
+</label>
+<label>
 <div class="label">작업명</div>
-<input id="meta-job" value="" placeholder="입력하세요" oninput="syncMeta()">
+<input id="meta-job" type="text" value="" maxlength="1000" placeholder="입력하세요" oninput="syncMeta()">
 <strong class="print-meta" id="print-job">미입력</strong>
 </label>
 <label>
-<div class="label">시료 / 색상명</div>
-<input id="meta-sample" value="" placeholder="입력하세요" oninput="syncMeta()">
-<strong class="print-meta" id="print-sample">미입력</strong>
+<div class="label">작업자</div>
+<input id="meta-operator" type="text" value="" maxlength="1000" placeholder="입력하세요" oninput="syncMeta()">
+<strong class="print-meta" id="print-operator">미입력</strong>
 </label>
 <label>
-<div class="label">용지</div>
-<input id="meta-paper" value="" placeholder="입력하세요" oninput="syncMeta()">
-<strong class="print-meta" id="print-paper">미입력</strong>
-</label>
-<label>
-<div class="label">인쇄 방식 / 조건</div>
-<input id="meta-press" value="" placeholder="입력하세요" oninput="syncMeta()">
-<strong class="print-meta" id="print-press">미입력</strong>
-</label>
-<label>
-<div class="label">측정 장비</div>
-<input id="meta-device" value="" placeholder="입력하세요" oninput="syncMeta()">
-<strong class="print-meta" id="print-device">미입력</strong>
-</label>
-<label>
-<div class="label">측정 모드</div>
-<input id="meta-mode" value="" placeholder="입력하세요" oninput="syncMeta()">
-<strong class="print-meta" id="print-mode">미입력</strong>
-</label>
-<label>
-<div class="label">광원 / 관찰자</div>
-<input id="meta-light" value="" placeholder="입력하세요" oninput="syncMeta()">
-<strong class="print-meta" id="print-light">미입력</strong>
-</label>
-<label>
-<div class="label">측정 방식</div>
-<input id="meta-method" value="" placeholder="입력하세요" oninput="syncMeta()">
-<strong class="print-meta" id="print-method">미입력</strong>
+<div class="label">비고</div>
+<textarea id="meta-notes" rows="1" maxlength="1000" placeholder="입력하세요" oninput="syncMeta()"></textarea>
+<strong class="print-meta" id="print-notes">미입력</strong>
 </label>
 </div>
 <div class="grid">
@@ -253,7 +233,7 @@
 </main>
 <div class="toast" id="toast" role="status" aria-live="polite">
 </div>
-<script src="app.js?v=9f4d3e7f14f6" defer>
+<script src="app.js?v=9815b66e7f5e" defer>
 </script>
 </body>
 </html>
