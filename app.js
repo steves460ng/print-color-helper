@@ -185,6 +185,16 @@ function readMeasurement(prefix) {
   if (Math.abs(a) > 1000 || Math.abs(b) > 1000) { toast('a*, b* 값이 비정상적으로 큽니다. 장비 측정값을 확인하세요.'); return null; }
   return {id: uid(), L, a, b, time: now()};
 }
+// Decimal keyboards on some phones omit minus; keep decimal entry and toggle sign explicitly.
+function toggleSign(id) {
+  const input = $(id);
+  if (!['ta', 'tb', 'pa', 'pb'].includes(id) || !input) return;
+  const value = normalize(input.value);
+  input.value = value.startsWith('-') ? value.slice(1) : '-' + value.replace(/^\+/, '');
+  input.dispatchEvent(new Event('input', {bubbles: true}));
+  input.focus({preventScroll: true});
+  input.setSelectionRange(input.value.length, input.value.length);
+}
 function changed() { save(); render(); }
 function add(which) {
   const row = readMeasurement(which === 'target' ? 't' : 'p');
@@ -344,6 +354,6 @@ window.addEventListener('beforeprint',buildReport);
 window.addEventListener('beforeunload',e=>{if(storageFailure){e.preventDefault();e.returnValue='';}});
 // Avoid silently replacing another tab's changes.
 window.addEventListener('storage',e=>{if(e.key===STORAGE_KEY){loadError='다른 탭에서 기록이 변경되었습니다.';storageFailure=true;$('save-status').textContent='다른 탭 변경 · 저장 중지';toast('다른 탭에서 기록이 변경되었습니다. 현재 내용을 JSON으로 백업한 뒤 새로고침하세요.');}});
-document.addEventListener('click',e=>{const button=e.target.closest('button.del');if(button)remove(button.dataset.which,button.dataset.id);});
+document.addEventListener('click',e=>{const sign=e.target.closest('button.sign-toggle');if(sign)toggleSign(sign.dataset.for);const button=e.target.closest('button.del');if(button)remove(button.dataset.which,button.dataset.id);});
 hydrate();
 if(loadError){$('save-status').textContent='저장 기록 확인 필요';$('storage-note').textContent=loadError;toast(loadError);}else save();
