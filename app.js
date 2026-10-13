@@ -105,7 +105,7 @@ function emptyProject() {
   return {schemaVersion: 2, id: uid(), metadata: Object.fromEntries(META_KEYS.map(k => [k, ''])), target: [], print: [], threshold: 2, updatedAt: now()};
 }
 function validRows(rows) {
-  return Array.isArray(rows) && rows.length <= 10000 && rows.every(r => r && typeof r.id === 'string' && r.id.length < 100 && ['L','a','b'].every(k => Number.isFinite(r[k])) && r.L >= 0 && r.L <= 100 && Math.abs(r.a) <= 1000 && Math.abs(r.b) <= 1000 && typeof r.position === 'string' && r.position.length <= 200 && typeof r.time === 'string' && Number.isFinite(Date.parse(r.time))) && new Set(rows.map(r => r.id)).size === rows.length;
+  return Array.isArray(rows) && rows.length <= 10000 && rows.every(r => r && typeof r.id === 'string' && r.id.length < 100 && ['L','a','b'].every(k => Number.isFinite(r[k])) && r.L >= 0 && r.L <= 100 && Math.abs(r.a) <= 1000 && Math.abs(r.b) <= 1000 && (r.position === undefined || (typeof r.position === 'string' && r.position.length <= 200)) && typeof r.time === 'string' && Number.isFinite(Date.parse(r.time))) && new Set(rows.map(r => r.id)).size === rows.length;
 }
 function validLegacyState(s) {
   if (!s || s.schemaVersion !== 1 || typeof s.id !== 'string' || !s.metadata || !META_KEYS.every(k => typeof s.metadata[k] === 'string' && s.metadata[k].length <= 1000) || !validRows(s.target) || !Array.isArray(s.baselines) || s.baselines.length > 1000 || !Array.isArray(s.stages) || !s.stages.length || s.stages.length > 1000) return false;
@@ -183,7 +183,7 @@ function readMeasurement(prefix) {
   if (L < 0 || L > 100) { toast('L*는 0~100 범위로 입력하세요.'); return null; }
   // Guard arithmetic from malformed extremes, not a definition of CIELab's gamut.
   if (Math.abs(a) > 1000 || Math.abs(b) > 1000) { toast('a*, b* 값이 비정상적으로 큽니다. 장비 측정값을 확인하세요.'); return null; }
-  return {id: uid(), L, a, b, position: $(prefix+'pos').value, time: now()};
+  return {id: uid(), L, a, b, time: now()};
 }
 function changed() { save(); render(); }
 function add(which) {
@@ -254,7 +254,7 @@ function spreadSummary(data) {
 }
 function renderMeasurements(which, rows) {
   const data = stats(rows);
-  $(which+'-table').innerHTML = rows.length ? rows.map((r,i) => `<tr><td>${i+1}</td><td title="${escapeHtml(dateLabel(r.time))}">${escapeHtml(r.position)}</td><td>${f(r.L)}</td><td>${f(r.a)}</td><td>${f(r.b)}</td><td class="no-print"><button class="del" data-which="${which}" data-id="${escapeHtml(r.id)}" aria-label="${i+1}번 측정 삭제">×</button></td></tr>`).join('') : '<tr><td colspan="6" class="empty-row">아직 기록된 측정값이 없습니다.</td></tr>';
+  $(which+'-table').innerHTML = rows.length ? rows.map((r,i) => `<tr><td title="${escapeHtml(dateLabel(r.time))}">${i+1}</td><td>${f(r.L)}</td><td>${f(r.a)}</td><td>${f(r.b)}</td><td class="no-print"><button class="del" data-which="${which}" data-id="${escapeHtml(r.id)}" aria-label="${i+1}번 측정 삭제">×</button></td></tr>`).join('') : '<tr><td colspan="5" class="empty-row">아직 기록된 측정값이 없습니다.</td></tr>';
   $(which+'-stats').innerHTML = data.mean.map((v,i) => `<div class="stat"><span>평균 ${['L*','a*','b*'][i]}</span><strong>${f(v)}</strong><small>표준편차 ± ${f(data.sd[i])}</small></div>`).join('');
   $(which+'-detail').innerHTML = statsTable(data) + spreadSummary(data);
 }
@@ -307,9 +307,9 @@ function download(text, type, name) {
 }
 function exportData() { download(JSON.stringify(state,null,2),'application/json',`chroma-${new Date().toISOString().slice(0,10)}.json`); }
 function exportCsv() {
-  const rows = [['구분','번호','측정 시각','위치','L*','a*','b*','허용치 ΔE76']];
+  const rows = [['구분','번호','측정 시각','L*','a*','b*','허용치 ΔE76']];
   for (const [kind,data] of [['타겟',state.target],['인쇄물',state.print]]) {
-    data.forEach((r,i) => rows.push([kind,i+1,r.time,r.position,r.L,r.a,r.b,state.threshold]));
+    data.forEach((r,i) => rows.push([kind,i+1,r.time,r.L,r.a,r.b,state.threshold]));
   }
   const cell=v=>{let t=String(v);if(/^[=+@\-\t\r]/.test(t)&&typeof v!=='number')t="'"+t;return '"'+t.replace(/"/g,'""')+'"';};
   download('\ufeff'+rows.map(r=>r.map(cell).join(',')).join('\r\n'),'text/csv;charset=utf-8',`chroma-${new Date().toISOString().slice(0,10)}.csv`);
@@ -329,7 +329,7 @@ function newProject() {
   state=emptyProject(); loadError=''; hydrate(); save(); toast('새 작업을 시작했습니다.');
 }
 function rawTable(rows) {
-  return '<table><thead><tr><th>번호</th><th>측정 시각</th><th>위치</th><th>L*</th><th>a*</th><th>b*</th></tr></thead><tbody>'+rows.map((r,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(dateLabel(r.time))}</td><td>${escapeHtml(r.position)}</td><td>${f(r.L)}</td><td>${f(r.a)}</td><td>${f(r.b)}</td></tr>`).join('')+'</tbody></table>';
+  return '<table><thead><tr><th>번호</th><th>측정 시각</th><th>L*</th><th>a*</th><th>b*</th></tr></thead><tbody>'+rows.map((r,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(dateLabel(r.time))}</td><td>${f(r.L)}</td><td>${f(r.a)}</td><td>${f(r.b)}</td></tr>`).join('')+'</tbody></table>';
 }
 function buildReport() {
   $('report-time').textContent = '생성 시각 '+dateLabel(now());
