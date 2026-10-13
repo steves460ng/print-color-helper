@@ -82,10 +82,10 @@
 <div class="cardhead">
 <h2>
 <span class="number">01</span>타겟 측정</h2>
-<span class="pill" id="baseline-status">타겟 미확정</span>
+<span class="pill" id="target-status">측정 대기</span>
 </div>
 <div class="body">
-<p class="baseline-note" id="target-context"></p>
+<p class="hint">측정값 평균이 타겟값으로 자동 적용됩니다.</p>
 <div class="inputs" id="target-input">
 <label>L*<input id="tL" value="" inputmode="decimal">
 </label>
@@ -123,10 +123,7 @@
 </div>
 <div class="stats" id="target-stats">
 </div>
-<div class="baseline-controls no-print">
-<button class="btn" onclick="confirmBaseline()">타겟 기준 확정</button><button class="btn" onclick="clearTarget()">타겟 초안 비우기</button>
-<span class="hint" id="baseline-hint">타겟을 측정하고 기준을 확정하세요.</span>
-</div>
+<div class="measurement-controls no-print"><button class="btn" onclick="clearMeasurements('target')">측정값 비우기</button></div>
 <button class="detail" id="target-detail-button" aria-expanded="false" aria-controls="target-detail" onclick="toggleDetail('target')">＋ 상세 통계 펼치기</button>
 <div class="hidden detail-panel" id="target-detail">
 </div>
@@ -136,7 +133,7 @@
 <div class="cardhead">
 <h2>
 <span class="number">02</span>인쇄물 측정</h2>
-<span class="pill" id="stage-pill">초기 측정</span>
+<span class="pill" id="print-status">측정 대기</span>
 </div>
 <div class="body">
 <div class="inputs">
@@ -154,7 +151,7 @@
 </label>
 </div>
 <div class="addline">
-<span class="hint">현재 교정 단계에 기록합니다.</span>
+<span class="hint">추가한 측정값만 평균에 반영됩니다.</span>
 <button class="btn primary" onclick="add('print')">＋ 측정값 추가</button>
 </div>
 <div class="tablewrap">
@@ -176,10 +173,7 @@
 </div>
 <div class="stats" id="print-stats">
 </div>
-<div class="stage-editor no-print">
-<label>실제 조정 기록<input id="stage-note" maxlength="2000" placeholder="예: M +1%p · K 유지 / 잉크 농도 조정" oninput="updateNote()">
-</label>
-</div>
+<div class="measurement-controls no-print"><button class="btn" onclick="clearMeasurements('print')">측정값 비우기</button></div>
 <button class="detail" id="print-detail-button" aria-expanded="false" aria-controls="print-detail" onclick="toggleDetail('print')">＋ 상세 통계 펼치기</button>
 <div class="hidden detail-panel" id="print-detail">
 </div>
@@ -240,35 +234,6 @@
 </div>
 <div class="notice">D50·2° Lab → sRGB → 단순 CMYK 환산에 따른 참고 방향입니다. 실제 인쇄 조건의 반응은 다를 수 있습니다. 소량 시험 조정 후 재측정하세요.</div>
 </div>
-</section>
-<div class="section">
-<h2>
-<span class="number">04</span>교정 이력</h2>
-<div class="actions no-print">
-<label for="stage-select" class="sr-only">확인할 교정 단계</label>
-<select id="stage-select" onchange="selectStage(this.value)">
-</select>
-<button class="btn" onclick="nextStage()">＋ 다음 교정 시작</button>
-</div>
-</div>
-<section class="card long history">
-<div class="tablewrap">
-<table>
-<thead>
-<tr>
-<th>교정 단계</th>
-<th>측정 수</th>
-<th>평균 L* / a* / b*</th>
-<th>평균색 ΔE76</th>
-<th>판정</th>
-<th>실제 조정 내용</th>
-</tr>
-</thead>
-<tbody id="history">
-</tbody>
-</table>
-</div>
-<p class="hint" style="margin-top:12px">교정 단계별로 당시 확정한 타겟 기준과 허용치를 유지합니다. 이전 단계는 선택하여 확인할 수 있습니다.</p>
 </section>
 <section class="report-archive" id="report-archive">
 </section>

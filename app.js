@@ -91,7 +91,8 @@ var ColorCalc = (function(){
 
 
 // All records stay local. Exports are explicit backups; no measurements leave the browser.
-const STORAGE_KEY = 'chroma.workspace.v1';
+const STORAGE_KEY = 'chroma.workspace.v2';
+const LEGACY_STORAGE_KEY = 'chroma.workspace.v1';
 const META_KEYS = ['job', 'sample', 'paper', 'press', 'device', 'mode', 'light', 'method'];
 const $ = id => document.getElementById(id);
 const uid = () => crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
@@ -100,17 +101,13 @@ const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':
 const f = (v, n = 2) => Number.isFinite(v) ? (Math.abs(v) < .5 * 10 ** -n ? 0 : v).toFixed(n) : '—';
 const normalize = value => String(value).trim().replace(/[−‒–—－﹣]/g, '-').replace(/,/g, '.');
 const dateLabel = value => new Date(value).toLocaleString('ko-KR');
-function emptyStage(index, baselineId = null, threshold = 2) {
-  return {id: uid(), name: index === 0 ? '초기 측정' : `${index}차 교정`, baselineId, threshold, rows: [], note: '', createdAt: now()};
-}
 function emptyProject() {
-  const stage = emptyStage(0);
-  return {schemaVersion: 1, id: uid(), metadata: Object.fromEntries(META_KEYS.map(k => [k, ''])), target: [], baselines: [], activeBaselineId: null, stages: [stage], selectedStageId: stage.id, updatedAt: now()};
+  return {schemaVersion: 2, id: uid(), metadata: Object.fromEntries(META_KEYS.map(k => [k, ''])), target: [], print: [], threshold: 2, updatedAt: now()};
 }
 function validRows(rows) {
   return Array.isArray(rows) && rows.length <= 10000 && rows.every(r => r && typeof r.id === 'string' && r.id.length < 100 && ['L','a','b'].every(k => Number.isFinite(r[k])) && r.L >= 0 && r.L <= 100 && Math.abs(r.a) <= 1000 && Math.abs(r.b) <= 1000 && typeof r.position === 'string' && r.position.length <= 200 && typeof r.time === 'string' && Number.isFinite(Date.parse(r.time))) && new Set(rows.map(r => r.id)).size === rows.length;
 }
-function validState(s) {
+function validLegacyState(s) {
   if (!s || s.schemaVersion !== 1 || typeof s.id !== 'string' || !s.metadata || !META_KEYS.every(k => typeof s.metadata[k] === 'string' && s.metadata[k].length <= 1000) || !validRows(s.target) || !Array.isArray(s.baselines) || s.baselines.length > 1000 || !Array.isArray(s.stages) || !s.stages.length || s.stages.length > 1000) return false;
   const baselineIds = new Set(s.baselines.map(b => b.id));
   if (baselineIds.size !== s.baselines.length || !s.baselines.every(b => typeof b.id === 'string' && Number.isInteger(b.version) && b.version > 0 && validRows(b.rows) && b.rows.length > 0 && Number.isFinite(Date.parse(b.createdAt)))) return false;
@@ -118,15 +115,24 @@ function validState(s) {
   if (new Set(s.stages.map(t => t.id)).size !== s.stages.length) return false;
   return s.stages.every(t => typeof t.id === 'string' && typeof t.name === 'string' && t.name.length <= 100 && typeof t.note === 'string' && t.note.length <= 2000 && validRows(t.rows) && Number.isFinite(t.threshold) && t.threshold >= 0 && t.threshold <= 100 && (t.baselineId === null ? t.rows.length === 0 : baselineIds.has(t.baselineId)) && Number.isFinite(Date.parse(t.createdAt))) && s.stages.some(t => t.id === s.selectedStageId);
 }
+function validState(s) {
+  return !!s && s.schemaVersion === 2 && typeof s.id === 'string' && !!s.metadata && META_KEYS.every(k => typeof s.metadata[k] === 'string' && s.metadata[k].length <= 1000) && validRows(s.target) && validRows(s.print) && Number.isFinite(s.threshold) && s.threshold >= 0 && s.threshold <= 100 && (s.legacyArchive === undefined || validLegacyState(s.legacyArchive));
+}
+function readProject(s) {
+  if (validState(s)) return s;
+  if (!validLegacyState(s)) throw new Error('지원하는 CHROMA 기록 형식이 아닙니다.');
+  const selected = s.stages.find(stage => stage.id === s.selectedStageId);
+  // Keep the original document in exports; old local storage remains untouched.
+  return {schemaVersion: 2, id: s.id, metadata: structuredClone(s.metadata), target: structuredClone(s.target), print: structuredClone(selected.rows), threshold: selected.threshold, legacyArchive: structuredClone(s), updatedAt: now()};
+}
 let state = emptyProject();
 let storageFailure = false;
 let loadError = '';
 try {
-  const saved = localStorage.getItem(STORAGE_KEY);
+  const saved = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY);
   if (saved) {
     const parsed = JSON.parse(saved);
-    if (!validState(parsed)) throw new Error('저장 데이터의 형식이 올바르지 않습니다.');
-    state = parsed;
+    state = readProject(parsed);
   }
 } catch (e) {
   storageFailure = true;
@@ -154,9 +160,6 @@ function save() {
     toast('자동 저장에 실패했습니다. JSON 저장으로 백업하세요.');
   }
 }
-const current = () => state.stages.find(s => s.id === state.selectedStageId);
-const baselineFor = stage => state.baselines.find(b => b.id === stage.baselineId);
-const activeBaseline = () => state.baselines.find(b => b.id === state.activeBaselineId);
 const vector = row => [row.L, row.a, row.b];
 const de = (a, b) => ColorCalc.deltaE76(a, b).dE;
 function stats(rows) {
@@ -184,96 +187,38 @@ function readMeasurement(prefix) {
 }
 function changed() { save(); render(); }
 function add(which) {
-  if (which === 'print' && !baselineFor(current())) return toast('먼저 타겟 측정값을 추가하고 타겟 기준을 확정하세요.');
   const row = readMeasurement(which === 'target' ? 't' : 'p');
   if (!row) return;
-  const rows = which === 'target' ? state.target : current().rows;
+  const rows = state[which];
   if (rows.length >= 10000) return toast('한 측정 묶음에는 최대 10,000개를 기록할 수 있습니다.');
-  if (which === 'print' && !rows.length) current().metadata = structuredClone(state.metadata);
   rows.push(row);
   changed();
   toast('측정값을 기록했습니다.');
 }
 function remove(which, id) {
-  const rows = which === 'target' ? state.target : current().rows;
+  const rows = state[which];
   const index = rows.findIndex(r => r.id === id);
   if (index < 0) return;
   if (!confirm('이 측정 기록을 삭제할까요?')) return;
   rows.splice(index, 1);
   changed();
 }
-function editMeasurement(which,id) {
-  const rows=which==='target'?state.target:current().rows;
-  const row=rows.find(r=>r.id===id);
-  if(!row)return;
-  const values=[];
-  for(const [key,label] of [['L','L*'],['a','a*'],['b','b*']]) {
-    const answer=prompt(label+' 측정값을 수정하세요.',row[key]);
-    if(answer===null)return;
-    const text=normalize(answer),value=Number(text);
-    if(!/^[-+]?(\d+\.?\d*|\.\d+)$/.test(text)||!Number.isFinite(value)||(key==='L'?(value<0||value>100):Math.abs(value)>1000))return toast('유효한 측정값을 입력하세요.');
-    values.push(value);
-  }
-  const position=prompt('측정 위치',row.position);
-  if(position===null)return;
-  if(position.length>200)return toast('위치는 200자 이하로 입력하세요.');
-  Object.assign(row,{L:values[0],a:values[1],b:values[2],position,editedAt:now()});
+function clearMeasurements(which) {
+  if (!state[which].length) return;
+  if (!confirm((which === 'target' ? '타겟' : '인쇄물') + ' 측정값을 모두 비울까요?')) return;
+  state[which] = [];
   changed();
-}
-function clearTarget() {
-  if(!confirm('타겟 초안의 측정값을 비울까요? 이미 확정한 기준과 이전 교정 결과는 유지됩니다.'))return;
-  state.target=[]; changed();
 }
 function toggleDetail(which) {
   const collapsed = $(which+'-detail').classList.toggle('hidden');
   $(which+'-detail-button').setAttribute('aria-expanded', String(!collapsed));
   $(which+'-detail-button').textContent = collapsed ? '＋ 상세 통계 펼치기' : '− 상세 통계 접기';
 }
-function targetChanged() {
-  const baseline = activeBaseline();
-  return !baseline || JSON.stringify(state.target) !== JSON.stringify(baseline.rows);
-}
-function confirmBaseline() {
-  if (!state.target.length) return toast('타겟 측정값을 먼저 추가하세요.');
-  if (!targetChanged()) return toast('현재 타겟 측정값은 이미 기준으로 확정되어 있습니다.');
-  if (state.baselines.length >= 1000) return toast('기준 버전이 너무 많습니다. 백업 후 새 작업을 시작하세요.');
-  const baseline = {id: uid(), version: state.baselines.length + 1, rows: structuredClone(state.target), createdAt: now(), metadata: structuredClone(state.metadata)};
-  state.baselines.push(baseline);
-  state.activeBaselineId = baseline.id;
-  if (current().rows.length) {
-    if (state.stages.length >= 1000) { state.baselines.pop(); state.activeBaselineId = state.baselines.at(-1)?.id ?? null; return toast('교정 단계가 너무 많습니다. 백업 후 새 작업을 시작하세요.'); }
-    const stage = emptyStage(state.stages.length, baseline.id, current().threshold);
-    stage.note = '타겟 기준 변경';
-    state.stages.push(stage);
-    state.selectedStageId = stage.id;
-  } else current().baselineId = baseline.id;
-  changed();
-  toast(`타겟 기준 ${baseline.version}을 확정했습니다. 기존 교정 결과의 기준은 유지됩니다.`);
-}
-function nextStage() {
-  const baseline = activeBaseline();
-  if (!baseline) return toast('타겟 기준을 먼저 확정하세요.');
-  if (targetChanged()) return toast('타겟 측정값이 변경되었습니다. 기준을 확정한 뒤 다음 교정을 시작하세요.');
-  if (!current().rows.length) return toast('현재 단계에 인쇄물 측정값을 먼저 기록하세요.');
-  if (state.stages.length >= 1000) return toast('교정 단계가 너무 많습니다. 백업 후 새 작업을 시작하세요.');
-  const stage = emptyStage(state.stages.length, baseline.id, current().threshold);
-  state.stages.push(stage);
-  state.selectedStageId = stage.id;
-  changed();
-  toast('새 교정 단계를 시작했습니다. 실제 조정 내용도 기록하세요.');
-}
-function selectStage(id) {
-  if (!state.stages.some(s => s.id === id)) return;
-  state.selectedStageId = id;
-  for (const k of ['L','a','b']) $('p'+k).value = '';
-  changed();
-}
-function updateNote() { current().note = $('stage-note').value.slice(0,2000); save(); renderHistory(); }
 function updateThreshold() {
   const raw = normalize($('threshold').value);
   const n = Number(raw);
-  if (!raw || !Number.isFinite(n) || n < 0 || n > 100) { $('threshold').value = current().threshold; return toast('허용치는 0~100 사이 숫자로 입력하세요.'); }
-  current().threshold = n;
+  if (!raw || !Number.isFinite(n) || n < 0 || n > 100) { $('threshold').value = state.threshold; return toast('허용치는 0~100 사이 숫자로 입력하세요.'); }
+  state.threshold = n;
   changed();
 }
 function syncMeta() {
@@ -309,23 +254,22 @@ function spreadSummary(data) {
 }
 function renderMeasurements(which, rows) {
   const data = stats(rows);
-  $(which+'-table').innerHTML = rows.length ? rows.map((r,i) => `<tr><td>${i+1}</td><td title="${escapeHtml(dateLabel(r.time))}">${escapeHtml(r.position)}</td><td>${f(r.L)}</td><td>${f(r.a)}</td><td>${f(r.b)}</td><td class="no-print"><button class="edit-row" data-which="${which}" data-id="${escapeHtml(r.id)}" aria-label="${i+1}번 측정 수정">수정</button><button class="del" data-which="${which}" data-id="${escapeHtml(r.id)}" aria-label="${i+1}번 측정 삭제">×</button></td></tr>`).join('') : '<tr><td colspan="6" class="empty-row">아직 기록된 측정값이 없습니다.</td></tr>';
+  $(which+'-table').innerHTML = rows.length ? rows.map((r,i) => `<tr><td>${i+1}</td><td title="${escapeHtml(dateLabel(r.time))}">${escapeHtml(r.position)}</td><td>${f(r.L)}</td><td>${f(r.a)}</td><td>${f(r.b)}</td><td class="no-print"><button class="del" data-which="${which}" data-id="${escapeHtml(r.id)}" aria-label="${i+1}번 측정 삭제">×</button></td></tr>`).join('') : '<tr><td colspan="6" class="empty-row">아직 기록된 측정값이 없습니다.</td></tr>';
   $(which+'-stats').innerHTML = data.mean.map((v,i) => `<div class="stat"><span>평균 ${['L*','a*','b*'][i]}</span><strong>${f(v)}</strong><small>표준편차 ± ${f(data.sd[i])}</small></div>`).join('');
   $(which+'-detail').innerHTML = statsTable(data) + spreadSummary(data);
 }
 function direction(value, positive, negative) { return Math.abs(value) < .005 ? '차이 작음' : (value > 0 ? positive : negative); }
 function renderComparison() {
-  const stage = current(), baseline = baselineFor(stage);
-  const target = stats(baseline ? baseline.rows : []), measured = stats(stage.rows);
+  const target = stats(state.target), measured = stats(state.print);
   const valid = target.n && measured.n;
   const delta = valid ? de(target.mean, measured.mean) : NaN;
   $('de').textContent = f(delta);
-  $('verdict').textContent = valid ? delta <= stage.threshold ? '● 합격' : '● 불합격' : '측정 대기';
-  $('verdict').style.color = valid && delta > stage.threshold ? '#a96827' : '#275f45';
-  $('threshold-print').textContent = `허용치 ΔE76 ≤ ${stage.threshold}`;
-  $('count-copy').textContent = `${baseline ? '기준 '+baseline.version : '기준 미확정'} · 타겟 ${target.n}회 평균 ↔ 인쇄물 ${measured.n}회 평균 · ${stage.name}`;
+  $('verdict').textContent = valid ? delta <= state.threshold ? '● 합격' : '● 불합격' : '측정 대기';
+  $('verdict').style.color = valid && delta > state.threshold ? '#a96827' : '#275f45';
+  $('threshold-print').textContent = `허용치 ΔE76 ≤ ${state.threshold}`;
+  $('count-copy').textContent = `타겟 ${target.n}회 평균 ↔ 인쇄물 ${measured.n}회 평균 · 자동 비교`;
   if (!valid) {
-    $('channels').textContent = '타겟 기준을 확정하고 인쇄물 측정값을 추가하세요.';
+    $('channels').textContent = '타겟과 인쇄물 측정값을 추가하세요.';
     $('guide-copy').textContent = '측정값 입력 대기';
     $('sw-target').style.background = '#eee';
     $('sw-print').style.background = '#eee';
@@ -344,30 +288,16 @@ function renderComparison() {
   const inc = ca.cmyk.map((v,i) => v-cb.cmyk[i]>=.1?'CMYK'[i]:null).filter(Boolean);
   const dec = ca.cmyk.map((v,i) => v-cb.cmyk[i]<=-.1?'CMYK'[i]:null).filter(Boolean);
   const guide = outside ? 'sRGB 색역 밖 · CMYK 방향 안내 보류' : [inc.length ? inc.join('·')+' 증가 쪽' : '',dec.length ? dec.join('·')+' 감소 쪽' : ''].filter(Boolean).join(' / ') || '환산상 채널 차이가 작습니다';
-  const spread = distanceStats(stage.rows,target.mean);
-  $('guide-copy').innerHTML = `<div class="guideitem"><span class="arrow">↗</span><div><strong>측정된 색의 편차</strong><p>ΔL* ${f(diff[0])} · Δa* ${f(diff[1])} · Δb* ${f(diff[2])}<br>${direction(diff[0],'밝은 방향','어두운 방향')} / ${direction(diff[1],'적색 방향','녹색 방향')} / ${direction(diff[2],'황색 방향','청색 방향')}</p></div></div><div class="guideitem"><span class="arrow">⇄</span><div><strong>${guide}</strong><p>${outside?'환산 과정에서 색이 잘려 CMYK 수치로 보정 방향을 판단하기 어렵습니다.':delta<=stage.threshold?'현재 평균색은 허용치 이내입니다. 추가 조정 필요성을 먼저 확인하세요.':'환산상 참고 방향입니다. 소량 시험 조정 후 색차가 줄었는지 확인하세요.'}</p></div></div><p class="stats-note">개별 측정 ↔ 타겟 평균 ΔE76 · 평균 ${f(spread.avg)} / 최대 ${f(spread.max)}<br>평균색 판정과 개별 색차는 다를 수 있습니다. 측정 흔들림과 비슷한 작은 편차는 재측정하여 확인하세요.</p>`;
-}
-function renderHistory() {
-  $('history').innerHTML = state.stages.map(stage => {
-    const measured = stats(stage.rows), baseline = baselineFor(stage);
-    const delta = baseline && measured.n ? de(stats(baseline.rows).mean,measured.mean) : NaN;
-    return `<tr class="${stage.id===state.selectedStageId?'current':''}"><td>${escapeHtml(stage.name)}${stage.id===state.selectedStageId?' · 선택':''}<br><span class="mini">${baseline?'기준 '+baseline.version:'기준 미확정'} · 허용치 ${stage.threshold}</span></td><td>${measured.n}회</td><td>${measured.mean.map(v=>f(v)).join(' / ')}</td><td>${f(delta)}</td><td>${Number.isFinite(delta)?delta<=stage.threshold?'합격':'불합격':'대기'}</td><td>${escapeHtml(stage.note||'미입력')}</td></tr>`;
-  }).join('');
+  const spread = distanceStats(state.print,target.mean);
+  $('guide-copy').innerHTML = `<div class="guideitem"><span class="arrow">↗</span><div><strong>측정된 색의 편차</strong><p>ΔL* ${f(diff[0])} · Δa* ${f(diff[1])} · Δb* ${f(diff[2])}<br>${direction(diff[0],'밝은 방향','어두운 방향')} / ${direction(diff[1],'적색 방향','녹색 방향')} / ${direction(diff[2],'황색 방향','청색 방향')}</p></div></div><div class="guideitem"><span class="arrow">⇄</span><div><strong>${guide}</strong><p>${outside?'환산 과정에서 색이 잘려 CMYK 수치로 보정 방향을 판단하기 어렵습니다.':delta<=state.threshold?'현재 평균색은 허용치 이내입니다. 추가 조정 필요성을 먼저 확인하세요.':'환산상 참고 방향입니다. 소량 시험 조정 후 색차가 줄었는지 확인하세요.'}</p></div></div><p class="stats-note">개별 측정 ↔ 타겟 평균 ΔE76 · 평균 ${f(spread.avg)} / 최대 ${f(spread.max)}<br>평균색 판정과 개별 색차는 다를 수 있습니다. 측정 흔들림과 비슷한 작은 편차는 재측정하여 확인하세요.</p>`;
 }
 function render() {
-  const stage = current(), baseline = activeBaseline();
-  renderMeasurements('target',state.target);
-  renderMeasurements('print',stage.rows);
-  $('baseline-status').textContent = baseline ? `기준 ${baseline.version} · ${targetChanged()?'초안 변경됨':'확정'}` : '타겟 미확정';
-  $('baseline-hint').textContent = targetChanged() && baseline ? '추가·삭제된 초안은 기준 확정 전까지 판정에 반영되지 않습니다.' : '확정한 기준은 교정 단계별로 보존됩니다.';
-  const usedBaseline = baselineFor(stage);
-  $('target-context').textContent = usedBaseline ? `현재 판정 기준 ${usedBaseline.version}: Lab ${stats(usedBaseline.rows).mean.map(v=>f(v)).join(' / ')}. 아래 표는 수정 가능한 타겟 초안입니다.` : '아래 측정값은 타겟 초안입니다. 기준 확정 후 인쇄물을 비교할 수 있습니다.';
-  $('stage-pill').textContent = stage.name;
-  $('stage-note').value = stage.note;
-  $('threshold').value = stage.threshold;
-  $('stage-select').innerHTML = state.stages.map(s => `<option value="${escapeHtml(s.id)}" ${s.id===stage.id?'selected':''}>${escapeHtml(s.name)}</option>`).join('');
+  renderMeasurements('target', state.target);
+  renderMeasurements('print', state.print);
+  $('target-status').textContent = state.target.length ? `${state.target.length}회 평균 자동 적용` : '측정 대기';
+  $('print-status').textContent = state.print.length ? `${state.print.length}회 측정` : '측정 대기';
+  $('threshold').value = state.threshold;
   renderComparison();
-  renderHistory();
 }
 function download(text, type, name) {
   const url = URL.createObjectURL(new Blob([text],{type}));
@@ -377,12 +307,10 @@ function download(text, type, name) {
 }
 function exportData() { download(JSON.stringify(state,null,2),'application/json',`chroma-${new Date().toISOString().slice(0,10)}.json`); }
 function exportCsv() {
-  const rows=[];
-  rows[0]=['구분','기준/단계','번호','측정 시각','위치','L*','a*','b*','허용치 ΔE76','조정 메모'];
-  const addRows=(kind,name,data,threshold='',note='')=>data.forEach((r,i)=>rows.push([kind,name,i+1,r.time,r.position,r.L,r.a,r.b,threshold,note]));
-  addRows('타겟 초안','초안',state.target);
-  state.baselines.forEach(b=>addRows('타겟 기준',b.version,b.rows));
-  state.stages.forEach(s=>addRows('인쇄물',`${s.name} / 기준 ${baselineFor(s)?.version??'미확정'}`,s.rows,s.threshold,s.note));
+  const rows = [['구분','번호','측정 시각','위치','L*','a*','b*','허용치 ΔE76']];
+  for (const [kind,data] of [['타겟',state.target],['인쇄물',state.print]]) {
+    data.forEach((r,i) => rows.push([kind,i+1,r.time,r.position,r.L,r.a,r.b,state.threshold]));
+  }
   const cell=v=>{let t=String(v);if(/^[=+@\-\t\r]/.test(t)&&typeof v!=='number')t="'"+t;return '"'+t.replace(/"/g,'""')+'"';};
   download('\ufeff'+rows.map(r=>r.map(cell).join(',')).join('\r\n'),'text/csv;charset=utf-8',`chroma-${new Date().toISOString().slice(0,10)}.csv`);
 }
@@ -391,8 +319,7 @@ async function importData(input) {
   if (!file) return;
   try {
     if(file.size>10*1024*1024)throw new Error('파일은 10MB 이하만 가져올 수 있습니다.');
-    const parsed=JSON.parse(await file.text());
-    if(!validState(parsed))throw new Error('지원하는 CHROMA 기록 형식이 아닙니다.');
+    const parsed=readProject(JSON.parse(await file.text()));
     if(!confirm('현재 작업을 가져온 기록으로 교체할까요? 필요한 경우 먼저 JSON으로 백업하세요.'))return;
     state=parsed; loadError=''; hydrate(); save(); toast('기록을 복원했습니다.');
   }catch(e){toast('가져오기 실패: '+e.message);}finally{input.value='';}
@@ -406,13 +333,8 @@ function rawTable(rows) {
 }
 function buildReport() {
   $('report-time').textContent = '생성 시각 '+dateLabel(now());
-  const targets=state.baselines.map(b=>`<div class="report-block"><h2>타겟 기준 ${b.version}</h2><p>확정 시각 ${escapeHtml(dateLabel(b.createdAt))}</p>${b.metadata?'<p>확정 당시 측정 조건: '+['device','mode','light','method'].map(k=>escapeHtml(b.metadata[k]||'미입력')).join(' / ')+'</p>':''}${statsTable(stats(b.rows))}${spreadSummary(stats(b.rows))}<h3>타겟 원본 측정 기록</h3>${rawTable(b.rows)}</div>`).join('');
-  const stages=state.stages.map(s=>{
-    const baseline=baselineFor(s),data=stats(s.rows),target=baseline?stats(baseline.rows):null;
-    const delta=target&&data.n?de(target.mean,data.mean):NaN,dist=target?distanceStats(s.rows,target.mean):{avg:NaN,max:NaN};
-    return `<div class="report-block"><h2>${escapeHtml(s.name)} · 전체 측정 기록</h2><p>${baseline?'타겟 기준 '+baseline.version:'기준 미확정'} · 허용치 ${s.threshold} · 평균색 ΔE76 ${f(delta)} · ${Number.isFinite(delta)?delta<=s.threshold?'합격':'불합격':'측정 대기'}</p><p>개별 측정 ↔ 타겟 평균 ΔE76 · 평균 ${f(dist.avg)} / 최대 ${f(dist.max)}</p><p>실제 조정 내용: ${escapeHtml(s.note||'미입력')}</p>${s.metadata?'<p>측정 당시 조건: '+['device','mode','light','method'].map(k=>escapeHtml(s.metadata[k]||'미입력')).join(' / ')+'</p>':''}${statsTable(data)}${spreadSummary(data)}${rawTable(s.rows)}</div>`;
-  }).join('');
-  $('report-archive').innerHTML=targets+stages;
+  $('report-archive').innerHTML = `<div class="report-block"><h2>타겟 원본 측정 기록</h2>${rawTable(state.target)}<h2>인쇄물 원본 측정 기록</h2>${rawTable(state.print)}</div>`;
+
 }
 function printReport() {
   if(!state.metadata.mode||!state.metadata.light)toast('보고서에 측정 조건이 미입력 상태로 표시됩니다.');
@@ -422,6 +344,6 @@ window.addEventListener('beforeprint',buildReport);
 window.addEventListener('beforeunload',e=>{if(storageFailure){e.preventDefault();e.returnValue='';}});
 // Avoid silently replacing another tab's changes.
 window.addEventListener('storage',e=>{if(e.key===STORAGE_KEY){loadError='다른 탭에서 기록이 변경되었습니다.';storageFailure=true;$('save-status').textContent='다른 탭 변경 · 저장 중지';toast('다른 탭에서 기록이 변경되었습니다. 현재 내용을 JSON으로 백업한 뒤 새로고침하세요.');}});
-document.addEventListener('click',e=>{const button=e.target.closest('button.del');if(button)remove(button.dataset.which,button.dataset.id);const edit=e.target.closest('button.edit-row');if(edit)editMeasurement(edit.dataset.which,edit.dataset.id);});
+document.addEventListener('click',e=>{const button=e.target.closest('button.del');if(button)remove(button.dataset.which,button.dataset.id);});
 hydrate();
 if(loadError){$('save-status').textContent='저장 기록 확인 필요';$('storage-note').textContent=loadError;toast(loadError);}else save();
